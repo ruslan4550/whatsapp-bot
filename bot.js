@@ -16,21 +16,21 @@ Avtoçıxarış
 Manuel çıxarış
 🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
 
-// HTTP Server - QR kodu brauzerdə göstərmək üçün
+// HTTP Server
 const server = http.createServer((req, res) => {
     if (req.url === '/qr' && currentQrDataUrl) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`<html><body style="text-align:center; padding:20px; font-family: sans-serif;"><h2>WhatsApp QR Kodu</h2><img src="${currentQrDataUrl}" width="300" height="300"><p>WhatsApp-da: Ayarlar → Bağlı cihazlar → Cihaz əlavə et</p></body></html>`);
     } else {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Bot hazırda işləyir. Əgər QR kodu yoxdursa, bot artıq WhatsApp-a qoşuludur.');
+        res.end('Bot hazırda aktivdir və işləyir.');
     }
 });
 server.listen(process.env.PORT || 10000, () => console.log('HTTP server işləyir. Port:', process.env.PORT || 10000));
 
-// ANTI-CRASH (Çökmələrin qarşısını alan qoruma)
-process.on('uncaughtException', (err) => console.error('Gözlənilməz xəta (Uncaught Exception):', err));
-process.on('unhandledRejection', (reason, promise) => console.error('İşlənməmiş rədd edilmə (Unhandled Rejection):', reason));
+// ANTI-CRASH (Proqramın çökməsinin qarşısını alır)
+process.on('uncaughtException', (err) => console.log('Sistem xətası tutuldu, bot dayanmır:', err.message));
+process.on('unhandledRejection', (reason) => console.log('Gözlənilməz rədd edilmə tutuldu:', reason));
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
@@ -38,12 +38,12 @@ async function connectToWhatsApp() {
 
     const sock = makeWASocket({
         version,
-        logger: pino({ level: 'silent' }), // Lazımsız loqları tam gizlədir
+        logger: pino({ level: 'silent' }), 
         auth: state,
-        // 1. DÜZƏLİŞ: Botu rəsmi Masaüstü / Web WhatsApp kimi göstərir
         browser: Browsers.macOS('Desktop'),
         markOnlineOnConnect: true,
-        syncFullHistory: false
+        syncFullHistory: false,
+        generateHighQualityLinkPreviews: true
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -51,10 +51,7 @@ async function connectToWhatsApp() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
-        if (qr) {
-            currentQrDataUrl = await qrcode.toDataURL(qr);
-            console.log('QR hazırdır! Tarayıcıda /qr ünvanına keçin.');
-        }
+        if (qr) currentQrDataUrl = await qrcode.toDataURL(qr);
         
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
@@ -62,65 +59,79 @@ async function connectToWhatsApp() {
                 console.log('Bağlantı kəsildi, 5 saniyəyə avtomatik yenidən qoşulur...');
                 setTimeout(connectToWhatsApp, 5000);
             } else {
-                console.log('Sessiya bağlandı. Yenidən başlatmaq üçün "auth_info_baileys" qovluğunu silin.');
+                console.log('WhatsApp-dan çıxış edilib. "auth_info_baileys" qovluğunu silin və yenidən başladın.');
             }
         } else if (connection === 'open') {
             console.log('✅ Bot hazırdır və WhatsApp-a uğurla qoşuldu!');
             currentQrDataUrl = null;
-            await sock.sendPresenceUpdate('available'); 
+            await sock.sendPresenceUpdate('available').catch(() => {});
         }
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        // Yalnız yeni gələn mesajlara cavab ver
         if (type !== 'notify') return;
 
         for (const msg of messages) {
             try {
+                // Mesaj yoxdursa və ya bot özü göndəribsə keç
                 if (!msg.message || msg.key.fromMe) continue;
 
                 const from = msg.key.remoteJid;
                 
-                // Qrupları və lazımsız ünvanları blokla
+                // Qrupları (@g.us) və WhatsApp statuslarını (status@broadcast) blokla
                 if (!from || from === 'status@broadcast' || from.endsWith('@g.us')) continue;
 
+                // Yalnız şəxsi profillərə cavab ver
                 if (from.endsWith('@s.whatsapp.net')) {
-                    // Sistem/protokol mesajlarını kənarlaşdırırıq ki, boş xətalar yaranmasın
-                    const messageType = Object.keys(msg.message)[0];
-                    if (messageType === 'protocolMessage' || messageType === 'senderKeyDistributionMessage') continue;
+                    
+                    // Protokol (sistem) mesajlarını və ya reaksiyaları yoxlayıb rədd et
+                    if (msg.message.protocolMessage || msg.message.senderKeyDistributionMessage || msg.message.reactionMessage) continue;
 
                     console.log(`📩 Yeni mesaj gəldi: ${from}`);
 
-                    // Mavi tık xəta verərsə ana prosesi dayandırmaması üçün catch əlavə edildi
-                    await sock.readMessages([msg.key]).catch(() => {});
+                    // 1. Oxundu olaraq işarələ (Xəta versə belə keçəcək)
+                    try {
+                        await sock.readMessages([msg.key]);
+                    } catch (e) {
+                        console.log('Mavi tık atılarkən kiçik problem oldu, amma bot davam edir.');
+                    }
                     
-                    // "Yazır..." effekti
-                    await sock.sendPresenceUpdate('composing', from).catch(() => {});
-                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    // 2. "Yazır..." effekti ver (Xəta versə belə keçəcək)
+                    try {
+                        await sock.sendPresenceUpdate('composing', from);
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                    } catch (e) {
+                        console.log('Yazır effekti verilərkən problem oldu, amma bot davam edir.');
+                    }
 
-                    // 3. DÜZƏLİŞ: Şablon mesajın dəqiqliklə göndərilməsi
-                    await sock.sendMessage(from, { text: SABLON_MESAJ });
+                    // 3. ƏSAS MƏSƏLƏ: Mesajı göndər!
+                    try {
+                        await sock.sendMessage(from, { text: SABLON_MESAJ });
+                        console.log(`✅ Avtocavab göndərildi: ${from}`);
+                    } catch (e) {
+                        console.log(`❌ Mesaj göndərilə bilmədi:`, e);
+                    }
                     
-                    // Göndərdikdən sonra yenidən onlayn ol
-                    await sock.sendPresenceUpdate('available', from).catch(() => {});
-
-                    console.log(`✅ Avtocavab uğurla göndərildi: ${from}`);
+                    // 4. Proses bitdikdən sonra "Onlayn" vəziyyətinə qayıt
+                    try {
+                        await sock.sendPresenceUpdate('available', from);
+                    } catch (e) {}
                 }
             } catch (error) {
-                console.error(`❌ Mesaj emal edilərkən xəta yarandı, lakin bot işləməyə davam edir:`, error);
+                console.error(`❌ Ümumi mesaj xətası:`, error.message);
             }
         }
     });
     
-    // 2. DÜZƏLİŞ: Botun daimi Onlayn görünməsi üçün hər 5 dəqiqədən bir status yenilənir
+    // Botun onlayn düşməməsi üçün hər 3 dəqiqədən bir özünü yeniləyir
     setInterval(async () => {
         try {
             if (sock && sock.user) {
                 await sock.sendPresenceUpdate('available');
             }
-        } catch (err) {
-            // Səssizcə keç, botu dayandırma
-        }
-    }, 300000); // 300000ms = 5 dəqiqə
+        } catch (err) {}
+    }, 180000); 
 }
 
 connectToWhatsApp();
