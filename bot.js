@@ -1,14 +1,10 @@
-// bot.js faylı üçün hazır kod (MongoDB linki içəridədir)
-
 const { Client, RemoteAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const mongoose = require('mongoose');
 const http = require('http');
 
-// ─── MongoDB bağlantısı (şifrənizlə birlikdə hazır) ───
 const MONGO_URL = 'mongodb+srv://jmrkort_db_user:5yQ45yNADSw8z2J0@cluster0.qvfzfcc.mongodb.net/?appName=Cluster0';
 
-// ─── Sadə HTTP server (Render-in yoxlaması üçün) ───
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Bot işləyir');
@@ -16,11 +12,9 @@ const server = http.createServer((req, res) => {
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`HTTP server port ${PORT}-da işləyir`));
 
-// ─── Sessiyanı saxlayacaq model ───
 const sessionSchema = new mongoose.Schema({ id: String, data: Object });
 const Session = mongoose.model('Session', sessionSchema);
 
-// ─── WhatsApp botu ───
 const client = new Client({
     authStrategy: new RemoteAuth({
         store: {
@@ -46,7 +40,6 @@ const client = new Client({
     }
 });
 
-// ─── Avtomatik cavab mətni ───
 const SABLON_MESAJ = `📩 Avtomatik Cavab
 
 Status: 🟢 Avtocavab aktiv
@@ -58,16 +51,13 @@ Avtoçıxarış
 Manuel çıxarış
 🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
 
-// ─── QR kod ───
 client.on('qr', (qr) => {
     console.log('Aşağıdakı QR kodu WhatsApp ilə skan edin:');
     qrcode.generate(qr, { small: true });
 });
 
-// ─── Bot hazır olduqda ───
 client.on('ready', () => console.log('Bot hazırdır və işləyir!'));
 
-// ─── Mesaj gəldikdə avtomatik cavab ───
 client.on('message', async (message) => {
     if (message.from.endsWith('@c.us')) {
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -76,7 +66,6 @@ client.on('message', async (message) => {
     }
 });
 
-// ─── MongoDB-yə qoşul və botu başlat ───
 mongoose.connect(MONGO_URL)
     .then(() => {
         console.log('MongoDB bağlandı');
