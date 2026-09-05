@@ -3,6 +3,8 @@ const qrcode = require('qrcode');
 const qrcodeTerminal = require('qrcode-terminal');
 const mongoose = require('mongoose');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 const MONGO_URL = 'mongodb+srv://jmrkort_db_user:5yQ45yNADSw8z2J0@cluster0.qvfzfcc.mongodb.net/?appName=Cluster0';
 
@@ -19,6 +21,29 @@ const server = http.createServer((req, res) => {
 });
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`HTTP server port ${PORT}-da işləyir`));
+
+function findChromeExecutable() {
+    const baseDir = '/opt/render/project/src/.cache/chrome';
+    if (!fs.existsSync(baseDir)) {
+        console.error('Chrome qovluğu tapılmadı:', baseDir);
+        return null;
+    }
+    const dirs = fs.readdirSync(baseDir);
+    for (const dir of dirs) {
+        const execPath = path.join(baseDir, dir, 'chrome-linux64', 'chrome');
+        if (fs.existsSync(execPath)) {
+            return execPath;
+        }
+    }
+    console.error('Chrome icra faylı tapılmadı');
+    return null;
+}
+
+const chromePath = findChromeExecutable();
+if (!chromePath) {
+    process.exit(1);
+}
+console.log('Chrome tapıldı:', chromePath);
 
 const sessionSchema = new mongoose.Schema({ id: String, data: Object });
 const Session = mongoose.model('Session', sessionSchema);
@@ -45,7 +70,7 @@ const client = new Client({
     }),
     puppeteer: {
         headless: true,
-        executablePath: '/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome',
+        executablePath: chromePath,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     }
 });
@@ -64,7 +89,6 @@ Manuel çıxarış
 client.on('qr', async (qr) => {
     console.log('Aşağıdakı QR kodu WhatsApp ilə skan edin:');
     qrcodeTerminal.generate(qr, { small: true });
-
     currentQrDataUrl = await qrcode.toDataURL(qr);
     console.log('QR kodu brauzerdə görmək üçün: /qr ünvanına keçin');
 });
