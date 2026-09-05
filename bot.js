@@ -1,37 +1,30 @@
+// bot.js faylı üçün hazır kod (MongoDB linki içəridədir)
+
 const { Client, RemoteAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const mongoose = require('mongoose');
 const http = require('http');
 
-// MongoDB bağlantı URL-i (Render-də mühit dəyişəni kimi təyin ediləcək)
-const MONGO_URL = process.env.MONGO_URL;
-if (!MONGO_URL) {
-    console.error('MONGO_URL mühit dəyişəni təyin olunmayıb!');
-    process.exit(1);
-}
+// ─── MongoDB bağlantısı (şifrənizlə birlikdə hazır) ───
+const MONGO_URL = 'mongodb+srv://jmrkort_db_user:5yQ45yNADSw8z2J0@cluster0.qvfzfcc.mongodb.net/?appName=Cluster0';
 
-// ─── Sadə HTTP server (Render-in sağlamlıq yoxlaması üçün) ───
+// ─── Sadə HTTP server (Render-in yoxlaması üçün) ───
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Bot işləyir');
 });
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => console.log(`HTTP server port ${PORT}-da dinlənilir`));
+server.listen(PORT, () => console.log(`HTTP server port ${PORT}-da işləyir`));
 
-// ─── Sessiyanı saxlayacaq MongoDB model ───
-const sessionSchema = new mongoose.Schema({
-    id: String,
-    data: Object
-});
+// ─── Sessiyanı saxlayacaq model ───
+const sessionSchema = new mongoose.Schema({ id: String, data: Object });
 const Session = mongoose.model('Session', sessionSchema);
 
 // ─── WhatsApp botu ───
 const client = new Client({
     authStrategy: new RemoteAuth({
         store: {
-            async sessionExists({ session }) {
-                return !!await Session.findOne({ id: session });
-            },
+            async sessionExists({ session }) { return !!await Session.findOne({ id: session }); },
             async save({ session, sessionData }) {
                 await Session.findOneAndUpdate(
                     { id: session },
@@ -43,9 +36,7 @@ const client = new Client({
                 const doc = await Session.findOne({ id: session });
                 return doc ? doc.data : null;
             },
-            async delete({ session }) {
-                await Session.deleteOne({ id: session });
-            }
+            async delete({ session }) { await Session.deleteOne({ id: session }); }
         },
         clientId: 'bot-client'
     }),
@@ -69,14 +60,12 @@ Manuel çıxarış
 
 // ─── QR kod ───
 client.on('qr', (qr) => {
-    console.log('Aşağıdakı QR kodu telefonunuzdakı WhatsApp ilə skan edin:');
+    console.log('Aşağıdakı QR kodu WhatsApp ilə skan edin:');
     qrcode.generate(qr, { small: true });
 });
 
 // ─── Bot hazır olduqda ───
-client.on('ready', () => {
-    console.log('Bot hazırdır və işləyir!');
-});
+client.on('ready', () => console.log('Bot hazırdır və işləyir!'));
 
 // ─── Mesaj gəldikdə avtomatik cavab ───
 client.on('message', async (message) => {
@@ -87,13 +76,13 @@ client.on('message', async (message) => {
     }
 });
 
-// ─── MongoDB-yə qoşulub botu işə sal ───
+// ─── MongoDB-yə qoşul və botu başlat ───
 mongoose.connect(MONGO_URL)
     .then(() => {
         console.log('MongoDB bağlandı');
         client.initialize();
     })
     .catch(err => {
-        console.error('MongoDB bağlantı xətası:', err);
+        console.error('MongoDB xətası:', err);
         process.exit(1);
     });
