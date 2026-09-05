@@ -11,10 +11,10 @@ let currentQrDataUrl = null;
 const server = http.createServer((req, res) => {
     if (req.url === '/qr' && currentQrDataUrl) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`<html><body style="text-align:center;"><h2>WhatsApp QR</h2><img src="${currentQrDataUrl}" width="300" height="300"><p>WhatsApp-da Ayarlar → Bağlı cihazlar → Cihaz əlavə et</p></body></html>`);
+        res.end(`<html><body style="text-align:center; padding:20px;"><h2>WhatsApp QR Kodu</h2><img src="${currentQrDataUrl}" width="300" height="300"><p>WhatsApp-da: Ayarlar → Bağlı cihazlar → Cihaz əlavə et</p></body></html>`);
     } else {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Bot işləyir. QR üçün /qr');
+        res.end('Bot işləyir. QR üçün /qr ünvanına keçin.');
     }
 });
 server.listen(process.env.PORT || 10000, () => console.log('HTTP server işləyir'));
@@ -61,6 +61,7 @@ async function connectToWhatsApp() {
             }
         } else if (connection === 'open') {
             console.log('Bot hazırdır!');
+            currentQrDataUrl = null;
         }
     });
 
