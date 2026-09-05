@@ -5,16 +5,23 @@ const pino = require('pino');
 
 let currentQrDataUrl = null;
 
-const SABLON_MESAJ = `📩 Avtomatik Cavab
+// YENİLƏNMİŞ VƏ BUTON (LİNK) MƏNTİQİ ƏLAVƏ EDİLMİŞ ŞABLON
+const SABLON_MESAJ = `📩 *Avtomatik Cavab*
 
 Status: 🟢 Avtocavab aktiv
-Mətn:
-💳 Depozit → müştəriyə avtomatik kart məlumatlarını göndərsin.
-🔗 Avtodepozit → avtomatik depozit linkini göndərsin.
-💸 Çıxarış → iki seçim açılsın:
-Avtoçıxarış
-Manuel çıxarış
-🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
+Zəhmət olmasa, aşağıdakı seçimlərdən birinin üzərinə klikləyin:
+
+💳 *Kartdan Depozit*
+(Klikləyin) 👉 https://wa.me/17423849807?text=Kartdan%20depozit%20mini%2010%20AZN
+
+🔗 *Avtodepozit*
+(Klikləyin) 👉 http://www.yevrokassa/paystribe3d.com
+
+💸 *Çıxarış*
+(Klikləyin) 👉 https://wa.me/31684598734?text=Çıxarış%20etmək%20istəyirəm
+
+🌐 *Saytımız*
+(Birbaşa saytınıza keçid edir) 👉 https://sizin-saytiniz.com`;
 
 const server = http.createServer((req, res) => {
     if (req.url === '/qr' && currentQrDataUrl) {
@@ -65,46 +72,40 @@ async function connectToWhatsApp() {
     });
 
     sock.ev.on('messages.upsert', async (m) => {
-        // Əgər gələn mesaj "bildiriş" deyilsə keç
         if (m.type !== 'notify') return;
         
         const msg = m.messages[0];
         if (!msg) return;
 
-        // BURA ÇOX VACİBDİR: Mesajın şifrələnib-şifrələnmədiyini yoxlayırıq
         if (!msg.message) {
             console.log("⚠️ DİQQƏT: Mesaj gəldi, amma bot onu oxuya bilmir (Şifrələmə xətası).");
             return;
         }
 
-        // Özümüzün yazdığı mesajdırsa rədd edirik
         if (msg.key.fromMe) return;
 
         const from = msg.key.remoteJid;
         
-        // Qrup (@g.us) və WhatsApp Statuslarını bloklayırıq
         if (!from || from.includes('@g.us') || from === 'status@broadcast') return;
 
         console.log(`📩 Yeni mesaj qəbul edildi: ${from}`);
 
         try {
-            // 1. MESAJI AÇIB OXUMAQ (Mavi tık)
+            // 1. MESAJI AÇIB OXUMAQ
             await sock.readMessages([msg.key]);
-            console.log(`👁️ Mesaj oxundu olaraq işarələndi!`);
             
-            // 2. Təbii görünmək üçün 1 saniyə gözləmə
+            // 2. 1 saniyə gözləmə
             await new Promise(resolve => setTimeout(resolve, 1000));
 
-            // 3. CAVAB MESAJINI GÖNDƏRMƏK
+            // 3. YENİ LİNK-BUTONLU MESAJI GÖNDƏRMƏK
             await sock.sendMessage(from, { text: SABLON_MESAJ });
-            console.log(`✅ Cavab mesajı uğurla göndərildi!`);
+            console.log(`✅ Cavab mesajı (Butonlu menu) uğurla göndərildi!`);
 
         } catch (err) {
             console.log(`❌ Əməliyyat xətası:`, err.message);
         }
     });
     
-    // Daimi onlayn qalmaq üçün
     setInterval(async () => {
         try {
             if (sock && sock.user) await sock.sendPresenceUpdate('available');
