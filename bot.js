@@ -1,13 +1,10 @@
 const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
-const mongoose = require('mongoose');
 const http = require('http');
 const pino = require('pino');
 
-const MONGO_URL = 'mongodb+srv://jmrkort_db_user:5yQ45yNADSw8z2J0@cluster0.qvfzfcc.mongodb.net/?appName=Cluster0';
 let currentQrDataUrl = null;
 
-// Şablon mesaj yuxarı qaldırıldı ki, kod işə düşəndə dərhal əlçatan olsun
 const SABLON_MESAJ = `📩 Avtomatik Cavab
 
 Status: 🟢 Avtocavab aktiv
@@ -28,20 +25,20 @@ const server = http.createServer((req, res) => {
         res.end('Bot işləyir. QR üçün /qr ünvanına keçin.');
     }
 });
-server.listen(process.env.PORT || 10000, () => console.log('HTTP server işləyir'));
-
-let sock;
+server.listen(process.env.PORT || 10000, () => console.log('HTTP server işləyir. Port:', process.env.PORT || 10000));
 
 async function connectToWhatsApp() {
+    // Yeni auth sistemi (Mütləq əvvəlki auth_info_baileys qovluğunu silin)
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
 
-    sock = makeWASocket({
+    const sock = makeWASocket({
         version,
-        logger: pino({ level: 'silent' }),
+        logger: pino({ level: 'silent' }), // Lazımsız loqları gizlədir
         auth: state,
-        browser: ['Ubuntu', 'Chrome', '20.0.0'],
-        markOnlineOnConnect: true // Botun xətdə görünməsini təmin edir
+        browser: ['BotClient', 'Chrome', '20.0.0'], // Cihaz adı
+        markOnlineOnConnect: true, // Qoşulanda onlayn kimi işarələ
+        syncFullHistory: false // Donmaması üçün keçmiş mesajları yükləməyi dayandırır
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -57,55 +54,62 @@ async function connectToWhatsApp() {
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) {
-                console.log('Bağlantı kəsildi, yenidən qoşulur...');
+                console.log('Bağlantı kəsildi, 5 saniyəyə avtomatik yenidən qoşulur...');
                 setTimeout(connectToWhatsApp, 5000);
             } else {
-                console.log('Sessiya bağlandı. Yenidən qoşulmaq üçün "auth_info_baileys" qovluğunu silin.');
+                console.log('Sessiya bağlandı. Yenidən başlatmaq üçün "auth_info_baileys" qovluğunu silin.');
             }
         } else if (connection === 'open') {
-            console.log('Bot hazırdır və WhatsApp-a qoşuldu!');
+            console.log('✅ Bot hazırdır və WhatsApp-a uğurla qoşuldu!');
             currentQrDataUrl = null;
+            
+            // Botun daimi olaraq "Onlayn" (Çevrimiçi) görünməsini təmin edir
+            await sock.sendPresenceUpdate('available'); 
         }
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return; // Yalnız yeni gələn bildirişlər
+        if (type !== 'notify') return; // Yalnız yeni mesajlara reaksiya ver
 
         for (const msg of messages) {
             try {
-                if (!msg.message) continue; // Boş mesajları keç
-                if (msg.key.fromMe) continue; // Öz göndərdiyimiz mesajlara cavab vermə
+                if (!msg.message || msg.key.fromMe) continue;
 
-                // ƏSAS HƏLL: Kompanyon cihazın sinxronizasiya və protokol mesajlarını bloklayırıq
-                const isProtocolMsg = msg.message.protocolMessage || msg.message.senderKeyDistributionMessage;
-                if (isProtocolMsg) continue;
+                // Təhlükəsizlik şifrələmə mesajlarını (sistem mesajlarını) blokla
+                const isProtocol = msg.message.protocolMessage || msg.message.senderKeyDistributionMessage;
+                if (isProtocol) continue;
 
                 const from = msg.key.remoteJid;
-
-                // Statuslara və qruplara (sonu @g.us) cavab verməmək üçün yoxlama
+                
+                // Qruplar, statuslar və yararsız ünvanları blokla
                 if (!from || from === 'status@broadcast' || from.endsWith('@g.us')) continue;
 
-                // Yalnız şəxsi mesajlaşmalara (@s.whatsapp.net) cavab ver
+                // Yalnız şəxsi istifadəçilər
                 if (from.endsWith('@s.whatsapp.net')) {
-                    
-                    // (İstəyə bağlı) Mesajı "oxundu" kimi işarələ, bu WhatsApp-ın spama atma ehtimalını azaldır
-                    await sock.readMessages([msg.key]);
+                    console.log(`📩 Yeni mesaj gəldi: ${from}`);
 
-                    // Şablon mesajı göndər
+                    // 1. TƏK XƏTT PROBLEMİNİ HƏLL EDİR: Mesajı oxundu (mavi tık / qoşa xətt) edir
+                    await sock.readMessages([msg.key]);
+                    
+                    // 2. Realist davranış: "Yazır..." effekti göstərir
+                    await sock.sendPresenceUpdate('composing', from);
+                    
+                    // (İstəyə bağlı) Çox sürətli cavab verməmək üçün 1.5 saniyə gözləyir
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+
+                    // 3. Şablon mesajı göndərir
                     await sock.sendMessage(from, { text: SABLON_MESAJ });
-                    console.log(`✅ Avtocavab göndərildi: ${from}`);
+                    
+                    // 4. Göndərdikdən sonra təkrar "Onlayn" vəziyyətinə qayıdır
+                    await sock.sendPresenceUpdate('available', from);
+
+                    console.log(`✅ Avtocavab uğurla göndərildi: ${from}`);
                 }
             } catch (error) {
-                console.error(`❌ Mesaj göndərilərkən xəta baş verdi:`, error);
+                console.error(`❌ Mesaj emal edilərkən xəta:`, error);
             }
         }
     });
 }
 
-mongoose.connect(MONGO_URL).then(() => {
-    console.log('MongoDB bağlandı');
-    connectToWhatsApp();
-}).catch(err => {
-    console.error('MongoDB xətası', err);
-    process.exit(1);
-});
+connectToWhatsApp();
