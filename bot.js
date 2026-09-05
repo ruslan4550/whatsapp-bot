@@ -1,13 +1,21 @@
 const { Client, RemoteAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+const qrcode = require('qrcode');
+const qrcodeTerminal = require('qrcode-terminal');
 const mongoose = require('mongoose');
 const http = require('http');
 
 const MONGO_URL = 'mongodb+srv://jmrkort_db_user:5yQ45yNADSw8z2J0@cluster0.qvfzfcc.mongodb.net/?appName=Cluster0';
 
+let currentQrDataUrl = null;
+
 const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot işləyir');
+    if (req.url === '/qr' && currentQrDataUrl) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`<html><body style="text-align:center; background:#f0f0f0; padding:20px;"><h2>WhatsApp Bot QR Kodu</h2><img src="${currentQrDataUrl}" width="300" height="300"><p>Telefonunuzda WhatsApp-ı açın: Ayarlar → Bağlı cihazlar → Cihaz əlavə et. Sonra bu kodu skan edin.</p></body></html>`);
+    } else {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('Bot işləyir. QR kodu görmək üçün /qr ünvanına keçin.');
+    }
 });
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`HTTP server port ${PORT}-da işləyir`));
@@ -37,6 +45,7 @@ const client = new Client({
     }),
     puppeteer: {
         headless: true,
+        executablePath: '/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome',
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     }
 });
@@ -52,9 +61,12 @@ Avtoçıxarış
 Manuel çıxarış
 🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
 
-client.on('qr', (qr) => {
+client.on('qr', async (qr) => {
     console.log('Aşağıdakı QR kodu WhatsApp ilə skan edin:');
-    qrcode.generate(qr, { small: true });
+    qrcodeTerminal.generate(qr, { small: true });
+
+    currentQrDataUrl = await qrcode.toDataURL(qr);
+    console.log('QR kodu brauzerdə görmək üçün: /qr ünvanına keçin');
 });
 
 client.on('ready', () => console.log('Bot hazırdır və işləyir!'));
