@@ -32,7 +32,8 @@ const client = new Client({
             },
             async delete({ session }) { await Session.deleteOne({ id: session }); }
         },
-        clientId: 'bot-client'
+        clientId: 'bot-client',
+        backupSyncIntervalMs: 60000
     }),
     puppeteer: {
         headless: true,
