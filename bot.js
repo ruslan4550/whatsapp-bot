@@ -43,13 +43,13 @@ const Session = mongoose.model('Session', sessionSchema);
 
 async function useMongoAuthState(sessionId) {
     const doc = await Session.findOne({ id: sessionId });
-    let creds = doc?.creds || null;
+    let creds = doc?.creds || {};
     let keys = doc?.keys || {};
 
     return {
         state: {
-            creds: creds || undefined,
-            keys: keys || {}
+            creds,
+            keys
         },
         saveCreds: async () => {
             await Session.findOneAndUpdate(
@@ -81,7 +81,6 @@ async function connectToWhatsApp() {
     sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: true,
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
