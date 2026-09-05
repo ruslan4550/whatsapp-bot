@@ -1,15 +1,15 @@
 {
   "name": "whatsapp-bot",
   "version": "1.0.0",
-  "description": "Auto reply bot",
+  "description": "Auto reply bot using Baileys",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
   },
   "dependencies": {
-    "whatsapp-web.js": "^1.26.0",
+    "@whiskeysockets/baileys": "^6.7.8",
     "qrcode": "^1.5.3",
-    "qrcode-terminal": "^0.12.0",
-    "mongoose": "^7.5.0"
+    "mongoose": "^7.5.0",
+    "pino": "^8.17.2"
   }
 }

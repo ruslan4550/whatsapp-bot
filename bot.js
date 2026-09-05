@@ -1,91 +1,70 @@
-const { Client, RemoteAuth } = require('whatsapp-web.js');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
-const qrcodeTerminal = require('qrcode-terminal');
 const mongoose = require('mongoose');
 const http = require('http');
-const fs = require('fs');
-const path = require('path');
+const { createLogger } = require('pino');
 
 const MONGO_URL = 'mongodb+srv://jmrkort_db_user:5yQ45yNADSw8z2J0@cluster0.qvfzfcc.mongodb.net/?appName=Cluster0';
+const SESSION_ID = 'bot-client';
 
 let currentQrDataUrl = null;
 
+// HTTP server
 const server = http.createServer((req, res) => {
-    if (req.url === '/qr' && currentQrDataUrl) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`<!DOCTYPE html>
+    if (req.url === '/qr') {
+        if (currentQrDataUrl) {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(`<!DOCTYPE html>
 <html>
-<head>
-    <meta charset="UTF-8">
-    <title>WhatsApp QR</title>
-</head>
+<head><meta charset="UTF-8"><title>WhatsApp QR</title></head>
 <body style="text-align:center; background:#f0f0f0; padding:20px;">
-    <h2>WhatsApp Bot QR Kodu</h2>
-    <img src="${currentQrDataUrl}" width="300" height="300">
-    <p>Telefonunuzda WhatsApp-ı açın: Ayarlar → Bağlı cihazlar → Cihaz əlavə et. Sonra bu kodu skan edin.</p>
+<h2>WhatsApp Bot QR Kodu</h2>
+<img src="${currentQrDataUrl}" width="300" height="300">
+<p>Telefonunuzda WhatsApp-ı açın: Ayarlar → Bağlı cihazlar → Cihaz əlavə et. Sonra bu kodu skan edin.</p>
 </body>
 </html>`);
+        } else {
+            res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('Hazırda QR kod mövcud deyil. Bot ya artıq bağlanıb, ya da QR gözləyir.');
+        }
     } else {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Bot işləyir. QR kodu görmək üçün /qr ünvanına keçin.');
+        res.end('Bot işləyir. QR üçün /qr ünvanına keçin.');
     }
 });
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`HTTP server port ${PORT}-da işləyir`));
 
-function findChromeExecutable() {
-    const baseDir = '/opt/render/project/src/.cache/chrome';
-    if (!fs.existsSync(baseDir)) {
-        console.error('Chrome qovluğu tapılmadı:', baseDir);
-        return null;
-    }
-    const dirs = fs.readdirSync(baseDir);
-    for (const dir of dirs) {
-        const execPath = path.join(baseDir, dir, 'chrome-linux64', 'chrome');
-        if (fs.existsSync(execPath)) {
-            return execPath;
-        }
-    }
-    console.error('Chrome icra faylı tapılmadı');
-    return null;
-}
-
-const chromePath = findChromeExecutable();
-if (!chromePath) {
-    process.exit(1);
-}
-console.log('Chrome tapıldı:', chromePath);
-
-const sessionSchema = new mongoose.Schema({ id: String, data: Object });
+// MongoDB model for session
+const sessionSchema = new mongoose.Schema({
+    id: { type: String, unique: true },
+    creds: Object,
+    keys: Object
+});
 const Session = mongoose.model('Session', sessionSchema);
 
-const client = new Client({
-    authStrategy: new RemoteAuth({
-        store: {
-            async sessionExists({ session }) { return !!await Session.findOne({ id: session }); },
-            async save({ session, sessionData }) {
-                await Session.findOneAndUpdate(
-                    { id: session },
-                    { id: session, data: sessionData },
-                    { upsert: true }
-                );
-            },
-            async load({ session }) {
-                const doc = await Session.findOne({ id: session });
-                return doc ? doc.data : null;
-            },
-            async delete({ session }) { await Session.deleteOne({ id: session }); }
-        },
-        clientId: 'bot-client',
-        backupSyncIntervalMs: 60000
-    }),
-    puppeteer: {
-        headless: true,
-        executablePath: chromePath,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-    }
-});
+// Custom auth state using MongoDB
+async function useMongoAuthState(sessionId) {
+    const doc = await Session.findOne({ id: sessionId });
+    let creds = doc?.creds || null;
+    let keys = doc?.keys || {};
 
+    return {
+        state: {
+            creds: creds || undefined,
+            keys: keys || {}
+        },
+        saveCreds: async () => {
+            await Session.findOneAndUpdate(
+                { id: sessionId },
+                { id: sessionId, creds, keys },
+                { upsert: true }
+            );
+        }
+    };
+}
+
+// SABLON mesaj
 const SABLON_MESAJ = `📩 Avtomatik Cavab
 
 Status: 🟢 Avtocavab aktiv
@@ -97,27 +76,72 @@ Avtoçıxarış
 Manuel çıxarış
 🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
 
-client.on('qr', async (qr) => {
-    console.log('Aşağıdakı QR kodu WhatsApp ilə skan edin:');
-    qrcodeTerminal.generate(qr, { small: true });
-    currentQrDataUrl = await qrcode.toDataURL(qr);
-    console.log('QR kodu brauzerdə görmək üçün: /qr ünvanına keçin');
-});
+let sock;
 
-client.on('ready', () => console.log('Bot hazırdır və işləyir!'));
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMongoAuthState(SESSION_ID);
+    const { version } = await fetchLatestBaileysVersion();
 
-client.on('message', async (message) => {
-    if (message.from.endsWith('@c.us')) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await message.reply(SABLON_MESAJ);
-        console.log(`Cavab göndərildi: ${message.from}`);
-    }
-});
+    sock = makeWASocket({
+        version,
+        logger: createLogger({ level: 'silent' }),
+        printQRInTerminal: true,
+        auth: {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, createLogger({ level: 'silent' }))
+        },
+        browser: ['Ubuntu', 'Chrome', '20.0.0'],
+        syncFullHistory: false,
+        generateHighQualityLinkPreview: false,
+        markOnlineOnConnect: false
+    });
 
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        if (qr) {
+            console.log('Yeni QR kod yaradıldı');
+            currentQrDataUrl = await qrcode.toDataURL(qr);
+            // QR kodu terminalda göstər
+            console.log('QR kodu /qr ünvanında mövcuddur');
+        }
+        if (connection === 'close') {
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            if (statusCode !== DisconnectReason.loggedOut) {
+                console.log('Bağlantı kəsildi, yenidən cəhd edilir...');
+                currentQrDataUrl = null;
+                setTimeout(connectToWhatsApp, 5000);
+            } else {
+                console.log('Sessiya çıxış edildi, yeni QR lazımdır');
+                currentQrDataUrl = null;
+            }
+        } else if (connection === 'open') {
+            console.log('Bot hazırdır və işləyir!');
+            currentQrDataUrl = null;
+        }
+    });
+
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type !== 'notify') return;
+        for (const msg of messages) {
+            if (!msg.key.fromMe && msg.message) {
+                const from = msg.key.remoteJid;
+                // Yalnız fərdi söhbətlərə cavab ver
+                if (from.endsWith('@s.whatsapp.net')) {
+                    await sock.sendMessage(from, { text: SABLON_MESAJ });
+                    console.log(`Cavab göndərildi: ${from}`);
+                }
+            }
+        }
+    });
+}
+
+// MongoDB-ə qoşul və botu başlat
 mongoose.connect(MONGO_URL)
     .then(() => {
         console.log('MongoDB bağlandı');
-        client.initialize();
+        connectToWhatsApp();
     })
     .catch(err => {
         console.error('MongoDB xətası:', err);
