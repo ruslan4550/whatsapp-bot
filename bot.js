@@ -1,11 +1,10 @@
-const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const mongoose = require('mongoose');
 const http = require('http');
 const pino = require('pino');
 
 const MONGO_URL = 'mongodb+srv://jmrkort_db_user:5yQ45yNADSw8z2J0@cluster0.qvfzfcc.mongodb.net/?appName=Cluster0';
-const SESSION_ID = 'bot-client';
 let currentQrDataUrl = null;
 
 const server = http.createServer((req, res) => {
@@ -19,49 +18,41 @@ const server = http.createServer((req, res) => {
 });
 server.listen(process.env.PORT || 10000, () => console.log('HTTP server işləyir'));
 
-const sessionSchema = new mongoose.Schema({ id: String, creds: Object, keys: Object });
-const Session = mongoose.model('Session', sessionSchema);
-
 let sock;
 
 async function connectToWhatsApp() {
-    const doc = await Session.findOne({ id: SESSION_ID });
-    const creds = doc?.creds || {};
-    const keys = doc?.keys || {};
-
+    // Baileys-in rəsmi və ən stabil auth sistemi
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
 
     sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
-        auth: {
-            creds,
-            keys: makeCacheableSignalKeyStore(keys, pino({ level: 'silent' }))
-        },
+        auth: state,
         browser: ['Ubuntu', 'Chrome', '20.0.0']
     });
 
-    sock.ev.on('creds.update', async () => {
-        await Session.findOneAndUpdate(
-            { id: SESSION_ID },
-            { id: SESSION_ID, creds: sock.authState.creds, keys: sock.authState.keys },
-            { upsert: true }
-        );
-    });
+    // Sessiya məlumatları yeniləndikcə qeyd edilir
+    sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
+        
         if (qr) {
             currentQrDataUrl = await qrcode.toDataURL(qr);
-            console.log('QR hazırdır /qr ünvanında');
+            console.log('QR hazırdır! Tarayıcıda /qr ünvanına keçin.');
         }
+        
         if (connection === 'close') {
-            if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
+            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            if (shouldReconnect) {
                 setTimeout(connectToWhatsApp, 5000);
+            } else {
+                console.log('Sessiya bağlandı. Yenidən qoşulmaq üçün "auth_info_baileys" qovluğunu silin və botu yenidən başladın.');
             }
         } else if (connection === 'open') {
-            console.log('Bot hazırdır!');
-            currentQrDataUrl = null;
+            console.log('Bot hazırdır və WhatsApp-a qoşuldu!');
+            currentQrDataUrl = null; // Qoşulduqdan sonra QR kodu təmizləyirik
         }
     });
 
@@ -90,6 +81,7 @@ Avtoçıxarış
 Manuel çıxarış
 🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
 
+// MongoDB bağlantısını digər mümkün əməliyyatlar üçün aktiv saxlayırıq
 mongoose.connect(MONGO_URL).then(() => {
     console.log('MongoDB bağlandı');
     connectToWhatsApp();
