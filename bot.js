@@ -1,23 +1,31 @@
 const { Client, RemoteAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const mongoose = require('mongoose');
+const http = require('http');
 
 // MongoDB bağlantı URL-i (Render-də mühit dəyişəni kimi təyin ediləcək)
 const MONGO_URL = process.env.MONGO_URL;
-
 if (!MONGO_URL) {
     console.error('MONGO_URL mühit dəyişəni təyin olunmayıb!');
     process.exit(1);
 }
 
-// Sessiyanı saxlayacaq MongoDB model
+// ─── Sadə HTTP server (Render-in sağlamlıq yoxlaması üçün) ───
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot işləyir');
+});
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => console.log(`HTTP server port ${PORT}-da dinlənilir`));
+
+// ─── Sessiyanı saxlayacaq MongoDB model ───
 const sessionSchema = new mongoose.Schema({
     id: String,
     data: Object
 });
 const Session = mongoose.model('Session', sessionSchema);
 
-// Botu yaradırıq
+// ─── WhatsApp botu ───
 const client = new Client({
     authStrategy: new RemoteAuth({
         store: {
@@ -47,7 +55,7 @@ const client = new Client({
     }
 });
 
-// Avtomatik cavab mətni (istədiyiniz şablon)
+// ─── Avtomatik cavab mətni ───
 const SABLON_MESAJ = `📩 Avtomatik Cavab
 
 Status: 🟢 Avtocavab aktiv
@@ -59,29 +67,27 @@ Avtoçıxarış
 Manuel çıxarış
 🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
 
-// QR kodu terminalda göstər
+// ─── QR kod ───
 client.on('qr', (qr) => {
     console.log('Aşağıdakı QR kodu telefonunuzdakı WhatsApp ilə skan edin:');
     qrcode.generate(qr, { small: true });
 });
 
-// Bot hazır olduqda
+// ─── Bot hazır olduqda ───
 client.on('ready', () => {
     console.log('Bot hazırdır və işləyir!');
 });
 
-// Mesaj gəldikdə avtomatik cavab
+// ─── Mesaj gəldikdə avtomatik cavab ───
 client.on('message', async (message) => {
-    // Yalnız fərdi söhbətlərə cavab ver (qruplara yox)
     if (message.from.endsWith('@c.us')) {
-        // 1 saniyə gecikmə (spam qorunması üçün)
         await new Promise(resolve => setTimeout(resolve, 1000));
         await message.reply(SABLON_MESAJ);
         console.log(`Cavab göndərildi: ${message.from}`);
     }
 });
 
-// MongoDB-yə qoşulub botu işə sal
+// ─── MongoDB-yə qoşulub botu işə sal ───
 mongoose.connect(MONGO_URL)
     .then(() => {
         console.log('MongoDB bağlandı');
