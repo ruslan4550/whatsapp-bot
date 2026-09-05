@@ -12,10 +12,21 @@ let currentQrDataUrl = null;
 
 const server = http.createServer((req, res) => {
     if (req.url === '/qr' && currentQrDataUrl) {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(`<html><body style="text-align:center; background:#f0f0f0; padding:20px;"><h2>WhatsApp Bot QR Kodu</h2><img src="${currentQrDataUrl}" width="300" height="300"><p>Telefonunuzda WhatsApp-ı açın: Ayarlar → Bağlı cihazlar → Cihaz əlavə et. Sonra bu kodu skan edin.</p></body></html>`);
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>WhatsApp QR</title>
+</head>
+<body style="text-align:center; background:#f0f0f0; padding:20px;">
+    <h2>WhatsApp Bot QR Kodu</h2>
+    <img src="${currentQrDataUrl}" width="300" height="300">
+    <p>Telefonunuzda WhatsApp-ı açın: Ayarlar → Bağlı cihazlar → Cihaz əlavə et. Sonra bu kodu skan edin.</p>
+</body>
+</html>`);
     } else {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('Bot işləyir. QR kodu görmək üçün /qr ünvanına keçin.');
     }
 });
