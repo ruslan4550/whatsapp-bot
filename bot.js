@@ -7,6 +7,18 @@ const pino = require('pino');
 const MONGO_URL = 'mongodb+srv://jmrkort_db_user:5yQ45yNADSw8z2J0@cluster0.qvfzfcc.mongodb.net/?appName=Cluster0';
 let currentQrDataUrl = null;
 
+// Şablon mesaj yuxarı qaldırıldı ki, kod işə düşəndə dərhal əlçatan olsun
+const SABLON_MESAJ = `📩 Avtomatik Cavab
+
+Status: 🟢 Avtocavab aktiv
+Mətn:
+💳 Depozit → müştəriyə avtomatik kart məlumatlarını göndərsin.
+🔗 Avtodepozit → avtomatik depozit linkini göndərsin.
+💸 Çıxarış → iki seçim açılsın:
+Avtoçıxarış
+Manuel çıxarış
+🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
+
 const server = http.createServer((req, res) => {
     if (req.url === '/qr' && currentQrDataUrl) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -21,7 +33,6 @@ server.listen(process.env.PORT || 10000, () => console.log('HTTP server işləyi
 let sock;
 
 async function connectToWhatsApp() {
-    // Baileys-in rəsmi və ən stabil auth sistemi
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
 
@@ -29,10 +40,10 @@ async function connectToWhatsApp() {
         version,
         logger: pino({ level: 'silent' }),
         auth: state,
-        browser: ['Ubuntu', 'Chrome', '20.0.0']
+        browser: ['Ubuntu', 'Chrome', '20.0.0'],
+        markOnlineOnConnect: true // Botun xətdə görünməsini təmin edir
     });
 
-    // Sessiya məlumatları yeniləndikcə qeyd edilir
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
@@ -46,42 +57,51 @@ async function connectToWhatsApp() {
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) {
+                console.log('Bağlantı kəsildi, yenidən qoşulur...');
                 setTimeout(connectToWhatsApp, 5000);
             } else {
-                console.log('Sessiya bağlandı. Yenidən qoşulmaq üçün "auth_info_baileys" qovluğunu silin və botu yenidən başladın.');
+                console.log('Sessiya bağlandı. Yenidən qoşulmaq üçün "auth_info_baileys" qovluğunu silin.');
             }
         } else if (connection === 'open') {
             console.log('Bot hazırdır və WhatsApp-a qoşuldu!');
-            currentQrDataUrl = null; // Qoşulduqdan sonra QR kodu təmizləyirik
+            currentQrDataUrl = null;
         }
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return;
+        if (type !== 'notify') return; // Yalnız yeni gələn bildirişlər
+
         for (const msg of messages) {
-            if (!msg.key.fromMe && msg.message) {
+            try {
+                if (!msg.message) continue; // Boş mesajları keç
+                if (msg.key.fromMe) continue; // Öz göndərdiyimiz mesajlara cavab vermə
+
+                // ƏSAS HƏLL: Kompanyon cihazın sinxronizasiya və protokol mesajlarını bloklayırıq
+                const isProtocolMsg = msg.message.protocolMessage || msg.message.senderKeyDistributionMessage;
+                if (isProtocolMsg) continue;
+
                 const from = msg.key.remoteJid;
+
+                // Statuslara və qruplara (sonu @g.us) cavab verməmək üçün yoxlama
+                if (!from || from === 'status@broadcast' || from.endsWith('@g.us')) continue;
+
+                // Yalnız şəxsi mesajlaşmalara (@s.whatsapp.net) cavab ver
                 if (from.endsWith('@s.whatsapp.net')) {
+                    
+                    // (İstəyə bağlı) Mesajı "oxundu" kimi işarələ, bu WhatsApp-ın spama atma ehtimalını azaldır
+                    await sock.readMessages([msg.key]);
+
+                    // Şablon mesajı göndər
                     await sock.sendMessage(from, { text: SABLON_MESAJ });
-                    console.log(`Cavab göndərildi: ${from}`);
+                    console.log(`✅ Avtocavab göndərildi: ${from}`);
                 }
+            } catch (error) {
+                console.error(`❌ Mesaj göndərilərkən xəta baş verdi:`, error);
             }
         }
     });
 }
 
-const SABLON_MESAJ = `📩 Avtomatik Cavab
-
-Status: 🟢 Avtocavab aktiv
-Mətn:
-💳 Depozit → müştəriyə avtomatik kart məlumatlarını göndərsin.
-🔗 Avtodepozit → avtomatik depozit linkini göndərsin.
-💸 Çıxarış → iki seçim açılsın:
-Avtoçıxarış
-Manuel çıxarış
-🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
-
-// MongoDB bağlantısını digər mümkün əməliyyatlar üçün aktiv saxlayırıq
 mongoose.connect(MONGO_URL).then(() => {
     console.log('MongoDB bağlandı');
     connectToWhatsApp();
