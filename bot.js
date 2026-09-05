@@ -5,7 +5,6 @@ const pino = require('pino');
 
 let currentQrDataUrl = null;
 
-// YENİLƏNMİŞ VƏ BUTON (LİNK) MƏNTİQİ ƏLAVƏ EDİLMİŞ ŞABLON
 const SABLON_MESAJ = `📩 *Avtomatik Cavab*
 
 Status: 🟢 Avtocavab aktiv
@@ -15,7 +14,7 @@ Zəhmət olmasa, aşağıdakı seçimlərdən birinin üzərinə klikləyin:
 (Klikləyin) 👉 https://wa.me/17423849807?text=Kartdan%20depozit%20mini%2010%20AZN
 
 🔗 *Avtodepozit*
-(Klikləyin) 👉 http://www.yevrokassa/paystribe3d.com
+(Klikləyin) 👉 http://www.yevrokassa.com/paystribe3d.com
 
 💸 *Çıxarış*
 (Klikləyin) 👉 https://wa.me/31684598734?text=Çıxarış%20etmək%20istəyirəm
@@ -34,7 +33,7 @@ const server = http.createServer((req, res) => {
 });
 server.listen(process.env.PORT || 10000, () => console.log('HTTP server işləyir. Port:', process.env.PORT || 10000));
 
-process.on('uncaughtException', (err) => console.log('Sistem xətası (çökmənin qarşısı alındı):', err.message));
+process.on('uncaughtException', (err) => console.log('Xəta tutuldu (Sistem dayanmır):', err.message));
 process.on('unhandledRejection', (reason) => console.log('Gözlənilməz rədd edilmə:', reason));
 
 async function connectToWhatsApp() {
@@ -47,7 +46,9 @@ async function connectToWhatsApp() {
         auth: state,
         browser: Browsers.macOS('Desktop'),
         markOnlineOnConnect: true,
-        syncFullHistory: false
+        syncFullHistory: false,
+        // ƏSAS HƏLL BURA ƏLAVƏ EDİLDİ: Link önizləmələrini (şəkil yükləməyi) ləğv edir ki, bot donmasın
+        generateHighQualityLinkPreviews: false 
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -62,8 +63,6 @@ async function connectToWhatsApp() {
             if (shouldReconnect) {
                 console.log('Bağlantı kəsildi, 5 saniyəyə yenidən qoşulur...');
                 setTimeout(connectToWhatsApp, 5000);
-            } else {
-                console.log('WhatsApp çıxış etdi. "auth_info_baileys" qovluğunu silin.');
             }
         } else if (connection === 'open') {
             console.log('✅ Bot hazırdır və WhatsApp-a bağlandı!');
@@ -75,34 +74,35 @@ async function connectToWhatsApp() {
         if (m.type !== 'notify') return;
         
         const msg = m.messages[0];
-        if (!msg) return;
-
-        if (!msg.message) {
-            console.log("⚠️ DİQQƏT: Mesaj gəldi, amma bot onu oxuya bilmir (Şifrələmə xətası).");
-            return;
-        }
-
-        if (msg.key.fromMe) return;
+        if (!msg || !msg.message || msg.key.fromMe) return;
 
         const from = msg.key.remoteJid;
-        
         if (!from || from.includes('@g.us') || from === 'status@broadcast') return;
 
-        console.log(`📩 Yeni mesaj qəbul edildi: ${from}`);
+        console.log(`📩 Yeni mesaj: ${from}`);
 
         try {
-            // 1. MESAJI AÇIB OXUMAQ
-            await sock.readMessages([msg.key]);
+            // 1. MESAJI OXUNDU ET
+            await sock.readMessages([msg.key]).catch(() => {});
             
-            // 2. 1 saniyə gözləmə
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // 2. YAZIR... EFFEKTİ (WhatsApp-ın botu spam kimi görməsinin qarşısını alır)
+            await sock.sendPresenceUpdate('composing', from).catch(() => {});
+            
+            // 3. TAM 2 SANİYƏ GÖZLƏ (Təbii insan reaksiyası)
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
-            // 3. YENİ LİNK-BUTONLU MESAJI GÖNDƏRMƏK
-            await sock.sendMessage(from, { text: SABLON_MESAJ });
-            console.log(`✅ Cavab mesajı (Butonlu menu) uğurla göndərildi!`);
+            // 4. MESAJI GÖNDƏR
+            const sentMsg = await sock.sendMessage(from, { text: SABLON_MESAJ });
+            
+            if(sentMsg) {
+                console.log(`✅ Cavab mesajı uğurla göndərildi!`);
+            }
+            
+            // 5. YENİDƏN ONLAYN OL
+            await sock.sendPresenceUpdate('available', from).catch(() => {});
 
         } catch (err) {
-            console.log(`❌ Əməliyyat xətası:`, err.message);
+            console.log(`❌ Mesaj göndərilərkən xəta:`, err.message);
         }
     });
     
