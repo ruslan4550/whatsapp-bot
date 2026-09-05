@@ -22,51 +22,32 @@ server.listen(process.env.PORT || 10000, () => console.log('HTTP server işləyi
 const sessionSchema = new mongoose.Schema({ id: String, creds: Object, keys: Object });
 const Session = mongoose.model('Session', sessionSchema);
 
-async function useMongoAuthState(sessionId) {
-    const doc = await Session.findOne({ id: sessionId });
-    return {
-        state: {
-            creds: doc?.creds || undefined,
-            keys: doc?.keys || {}
-        },
-        saveCreds: async () => {
-            await Session.findOneAndUpdate(
-                { id: sessionId },
-                { id: sessionId, creds: sock.authState.creds, keys: sock.authState.keys },
-                { upsert: true }
-            );
-        }
-    };
-}
-
-const SABLON_MESAJ = `📩 Avtomatik Cavab
-
-Status: 🟢 Avtocavab aktiv
-Mətn:
-💳 Depozit → müştəriyə avtomatik kart məlumatlarını göndərsin.
-🔗 Avtodepozit → avtomatik depozit linkini göndərsin.
-💸 Çıxarış → iki seçim açılsın:
-Avtoçıxarış
-Manuel çıxarış
-🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
-
 let sock;
 
 async function connectToWhatsApp() {
-    const { state, saveCreds } = await useMongoAuthState(SESSION_ID);
+    const doc = await Session.findOne({ id: SESSION_ID });
+    const creds = doc?.creds || {};
+    const keys = doc?.keys || {};
+
     const { version } = await fetchLatestBaileysVersion();
 
     sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
         auth: {
-            creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+            creds,
+            keys: makeCacheableSignalKeyStore(keys, pino({ level: 'silent' }))
         },
         browser: ['Ubuntu', 'Chrome', '20.0.0']
     });
 
-    sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('creds.update', async () => {
+        await Session.findOneAndUpdate(
+            { id: SESSION_ID },
+            { id: SESSION_ID, creds: sock.authState.creds, keys: sock.authState.keys },
+            { upsert: true }
+        );
+    });
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
@@ -96,6 +77,17 @@ async function connectToWhatsApp() {
         }
     });
 }
+
+const SABLON_MESAJ = `📩 Avtomatik Cavab
+
+Status: 🟢 Avtocavab aktiv
+Mətn:
+💳 Depozit → müştəriyə avtomatik kart məlumatlarını göndərsin.
+🔗 Avtodepozit → avtomatik depozit linkini göndərsin.
+💸 Çıxarış → iki seçim açılsın:
+Avtoçıxarış
+Manuel çıxarış
+🌐 Saytımız → birbaşa saytınıza yönləndirsin.`;
 
 mongoose.connect(MONGO_URL).then(() => {
     console.log('MongoDB bağlandı');
