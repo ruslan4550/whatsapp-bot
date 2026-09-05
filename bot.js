@@ -1,15 +1,14 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode');
 const mongoose = require('mongoose');
 const http = require('http');
-const { createLogger } = require('pino');
+const pino = require('pino');
 
 const MONGO_URL = 'mongodb+srv://jmrkort_db_user:5yQ45yNADSw8z2J0@cluster0.qvfzfcc.mongodb.net/?appName=Cluster0';
 const SESSION_ID = 'bot-client';
 
 let currentQrDataUrl = null;
 
-// HTTP server
 const server = http.createServer((req, res) => {
     if (req.url === '/qr') {
         if (currentQrDataUrl) {
@@ -35,7 +34,6 @@ const server = http.createServer((req, res) => {
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`HTTP server port ${PORT}-da işləyir`));
 
-// MongoDB model for session
 const sessionSchema = new mongoose.Schema({
     id: { type: String, unique: true },
     creds: Object,
@@ -43,7 +41,6 @@ const sessionSchema = new mongoose.Schema({
 });
 const Session = mongoose.model('Session', sessionSchema);
 
-// Custom auth state using MongoDB
 async function useMongoAuthState(sessionId) {
     const doc = await Session.findOne({ id: sessionId });
     let creds = doc?.creds || null;
@@ -64,7 +61,6 @@ async function useMongoAuthState(sessionId) {
     };
 }
 
-// SABLON mesaj
 const SABLON_MESAJ = `📩 Avtomatik Cavab
 
 Status: 🟢 Avtocavab aktiv
@@ -84,11 +80,11 @@ async function connectToWhatsApp() {
 
     sock = makeWASocket({
         version,
-        logger: createLogger({ level: 'silent' }),
+        logger: pino({ level: 'silent' }),
         printQRInTerminal: true,
         auth: {
             creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, createLogger({ level: 'silent' }))
+            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
         },
         browser: ['Ubuntu', 'Chrome', '20.0.0'],
         syncFullHistory: false,
@@ -103,7 +99,6 @@ async function connectToWhatsApp() {
         if (qr) {
             console.log('Yeni QR kod yaradıldı');
             currentQrDataUrl = await qrcode.toDataURL(qr);
-            // QR kodu terminalda göstər
             console.log('QR kodu /qr ünvanında mövcuddur');
         }
         if (connection === 'close') {
@@ -127,7 +122,6 @@ async function connectToWhatsApp() {
         for (const msg of messages) {
             if (!msg.key.fromMe && msg.message) {
                 const from = msg.key.remoteJid;
-                // Yalnız fərdi söhbətlərə cavab ver
                 if (from.endsWith('@s.whatsapp.net')) {
                     await sock.sendMessage(from, { text: SABLON_MESAJ });
                     console.log(`Cavab göndərildi: ${from}`);
@@ -137,7 +131,6 @@ async function connectToWhatsApp() {
     });
 }
 
-// MongoDB-ə qoşul və botu başlat
 mongoose.connect(MONGO_URL)
     .then(() => {
         console.log('MongoDB bağlandı');
